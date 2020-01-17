@@ -29,7 +29,7 @@ ifeq ($(JAVA_HOME),)
  $(error JAVA_HOME is not set)
 endif
 
-INCLUDES+=-I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/darwin
+INCLUDES+=-I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
 JAVADOCFLAGS?=-quiet -author -link http://java.sun.com/j2se/1.4.2/docs/api/
 
 LDVER?=$(shell ld -v | cut -d' ' -f1)
@@ -37,7 +37,7 @@ LDVER?=$(shell ld -v | cut -d' ' -f1)
 ifeq ($(LDVER),GNU)
 LDSHAREFLAGS+=-fpic -shared
 else
-LDSHAREFLAGS+=-lc -shared
+LDSHAREFLAGS+=-lc
 endif
 
 SRC=$(shell find BASEDIR/src/main/java/cx -name '*.java')
