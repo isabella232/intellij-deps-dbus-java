@@ -9,17 +9,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.stream.Collectors;
 
+import javax.swing.text.Position;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.freedesktop.dbus.Tuple;
-import org.freedesktop.dbus.annotations.Position;
 import org.freedesktop.dbus.connections.impl.DBusConnection;
 import org.freedesktop.dbus.connections.impl.DBusConnection.DBusBusType;
 import org.freedesktop.dbus.exceptions.DBusException;
 import org.freedesktop.dbus.exceptions.DBusExecutionException;
+import org.freedesktop.dbus.interfaces.DBusInterface;
 import org.freedesktop.dbus.interfaces.Introspectable;
 import org.freedesktop.dbus.messages.DBusSignal;
 import org.freedesktop.dbus.utils.generator.ClassBuilderInfo.ClassConstructor;
@@ -148,7 +148,9 @@ public class InterfaceCodeGenerator {
         ClassBuilderInfo interfaceClass = new ClassBuilderInfo();
         interfaceClass.setClassType(ClassType.INTERFACE);
         interfaceClass.setPackageName(packageName);
+        interfaceClass.setDbusPackageName(fqcn.get(DbusInterfaceToFqcn.DBUS_INTERFACE_NAME));
         interfaceClass.setClassName(className);
+        interfaceClass.setExtendClass(DBusInterface.class.getName());
 
         List<ClassBuilderInfo> additionalClasses = new ArrayList<>();
 
@@ -198,8 +200,9 @@ public class InterfaceCodeGenerator {
 
         ClassBuilderInfo innerClass = new ClassBuilderInfo();
         innerClass.setClassType(ClassType.CLASS);
-        innerClass.setExtendClass(DBusSignal.class.getSimpleName());
+        innerClass.setExtendClass(DBusSignal.class.getName());
         innerClass.getImports().add(DBusSignal.class.getName());
+        innerClass.getImports().add(DBusException.class.getName());
         innerClass.setClassName(className);
 
         _clzBldr.getInnerClasses().add(innerClass);
@@ -211,7 +214,7 @@ public class InterfaceCodeGenerator {
         int unknownArgCnt = 0;
         for (Element argElm : signalArgs) {
                 String argType = TypeConverter.getJavaTypeFromDBusType(argElm.getAttribute("type"), _clzBldr.getImports());
-                String argName = argElm.getAttribute("name");
+                String argName = StringUtil.snakeToCamelCase(argElm.getAttribute("name"));
                 if (StringUtil.isBlank(argName)) {
                     argName = "arg" + unknownArgCnt;
                     unknownArgCnt++;
@@ -225,10 +228,20 @@ public class InterfaceCodeGenerator {
         }
 
         ClassConstructor classConstructor = new ClassBuilderInfo.ClassConstructor();
-        Map<String, String> invertedMap = args.entrySet().stream().collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey, (k1,k2) -> k1, LinkedHashMap::new));
-        classConstructor.getArguments().putAll(invertedMap);
-        classConstructor.getSuperArguments().addAll(args.keySet());
 
+        Map<String, String> argsMap = new LinkedHashMap<>();
+        for (Entry<String, String> e : args.entrySet()) {
+            argsMap.put("_" + e.getKey(), e.getValue());
+        }
+        
+        classConstructor.getArguments().putAll(argsMap);
+        classConstructor.getThrowArguments().add(DBusException.class.getSimpleName());
+        
+        classConstructor.getSuperArguments().put("_path", "String");
+        classConstructor.getSuperArguments().put("_interfaceName", "String");
+
+        innerClass.getConstructors().add(classConstructor);
+        
 
         return additionalClasses;
     }
@@ -273,6 +286,8 @@ public class InterfaceCodeGenerator {
                 if (StringUtil.isBlank(argName)) {
                     argName = "arg" + unknownArgNameCnt;
                     unknownArgNameCnt++;
+                } else {
+                    argName = StringUtil.snakeToCamelCase(argName);
                 }
 
                 if ("in".equals(argElm.getAttribute("direction"))) {
@@ -370,7 +385,11 @@ public class InterfaceCodeGenerator {
                 outputFile.getParentFile().mkdirs();
             }
 
-            FileIoUtil.writeTextFile(outputFile.getAbsolutePath(), entry.getValue(), Charset.defaultCharset(), false);
+            if (FileIoUtil.writeTextFile(outputFile.getAbsolutePath(), entry.getValue(), Charset.defaultCharset(), false)) {
+                LoggerFactory.getLogger(InterfaceCodeGenerator.class).info("Created class file {}", outputFile.getAbsolutePath());
+            } else {
+                LoggerFactory.getLogger(InterfaceCodeGenerator.class).error("Could not write content to class file {}", outputFile.getName());
+            }
         }
     }
 
@@ -380,7 +399,8 @@ public class InterfaceCodeGenerator {
         String outputDir = null;
         DBusBusType busType = null;
         boolean ignoreDtd = true;
-        String objectPath = "/";
+        String objectPath = null;
+        String inputFile = null;
 
         for (int i = 0; i < args.length; i++) {
             String p = args[i];
@@ -398,7 +418,14 @@ public class InterfaceCodeGenerator {
                 System.exit(0);
             } else if ("--outputDir".equals(p) || "-o".equals(p)) {
                 if (args.length > i) {
-                    outputDir = args[i++];
+                    outputDir = args[++i];
+                } else {
+                    printHelp();
+                    System.exit(0);
+                }
+            } else if ("--inputFile".equals(p) || "-i".equals(p)) {
+                if (args.length > i) {
+                    inputFile = args[++i];
                 } else {
                     printHelp();
                     System.exit(0);
@@ -415,6 +442,10 @@ public class InterfaceCodeGenerator {
             }
         }
 
+        if (objectPath == null) {
+            objectPath = "/";
+        }
+        
         if (outputDir == null) {
             throw new RuntimeException("No output directory (--outputDir) given!");
         }
@@ -424,49 +455,60 @@ public class InterfaceCodeGenerator {
         String introspectionData = null;
 
         if (!StringUtil.isBlank(busName)) {
-            try {
-
-                logger.info("Introspecting: { Interface: {}, Busname: {} }", objectPath, busName);
-
-                DBusConnection conn = DBusConnection.getConnection(busType);
-
-                Introspectable in = conn.getRemoteObject(busName, objectPath, Introspectable.class);
-                introspectionData = in.Introspect();
-                if (StringUtil.isBlank(introspectionData)) {
-                    logger.error("Failed to get introspection data");
+            if (!StringUtil.isBlank(inputFile)) {
+                File file = new File(inputFile);
+                if (!file.exists()) {
+                    logger.error("Given input file {} does not exist", file);
                     System.exit(1);
                 }
-                conn.disconnect();
-            } catch (DBusExecutionException | DBusException _ex) {
-                logger.error("Failure in DBus Communications. ", _ex);
-                System.exit(1);
-
+                introspectionData = FileIoUtil.readFileToString(file);
+            } else {
+                try {
+                    logger.info("Introspecting: { Interface: {}, Busname: {} }", objectPath, busName);
+    
+                    DBusConnection conn = DBusConnection.getConnection(busType);
+    
+                    Introspectable in = conn.getRemoteObject(busName, objectPath, Introspectable.class);
+                    introspectionData = in.Introspect();
+                    if (StringUtil.isBlank(introspectionData)) {
+                        logger.error("Failed to get introspection data");
+                        System.exit(1);
+                    }
+                    conn.disconnect();
+                } catch (DBusExecutionException | DBusException _ex) {
+                    logger.error("Failure in DBus Communications. ", _ex);
+                    System.exit(1);
+    
+                }
             }
-
+            
             InterfaceCodeGenerator ci2 = new InterfaceCodeGenerator(introspectionData, objectPath, busName);
             try {
 
                 Map<File, String> analyze = ci2.analyze(ignoreDtd);
                 writeToFile(outputDir, analyze);
+                logger.info("Interface creation finished");
             } catch (Exception _ex) {
                 logger.error("Error while analyzing introspection data", _ex);
             }
+        } else {
+            logger.error("Busname missing!");
+            System.exit(1);
         }
     }
-
 
     private static void version() {
         System.out.println("Java D-Bus Version " + System.getProperty("Version"));
         System.exit(1);
     }
 
-
     private static void printHelp() {
-        System.out.println("Syntax: <options> [busname object]");
+        System.out.println("Syntax: <options> [busname object] [object path]");
         System.out.println("        Options: ");
-        System.out.println("        --system          | -y           Use SYSTEM DBus");
-        System.out.println("        --session         | -s           Use SESSION DBus");
-        System.out.println("        --outputDir <Dir> | -o <Dir>     Use <Dir> as output directory for all generated files");
+        System.out.println("        --system           | -y           Use SYSTEM DBus");
+        System.out.println("        --session          | -s           Use SESSION DBus");
+        System.out.println("        --outputDir <Dir>  | -o <Dir>     Use <Dir> as output directory for all generated files");
+        System.out.println("        --inputFile <File> | -i <File>    Use <File> as XML introspection input file instead of querying DBus");
         System.out.println("");
         System.out.println("        --enable-dtd-validation          Enable DTD validation of introspection XML");
         System.out.println("        --version                        Show version information");
@@ -474,7 +516,7 @@ public class InterfaceCodeGenerator {
     }
 
     static enum DbusInterfaceToFqcn {
-        PACKAGENAME, CLASSNAME;
+        PACKAGENAME, ORIG_PKGNAME, CLASSNAME, DBUS_INTERFACE_NAME;
 
         public static Map<DbusInterfaceToFqcn, String> toFqcn(String _interfaceName) {
             String packageName ;
@@ -490,7 +532,11 @@ public class InterfaceCodeGenerator {
 
             map.put(DbusInterfaceToFqcn.CLASSNAME, StringUtil.upperCaseFirstChar(className));
             map.put(DbusInterfaceToFqcn.PACKAGENAME, packageName.toLowerCase());
-
+            
+            if (!packageName.equals(packageName.toLowerCase())) {
+                map.put(DbusInterfaceToFqcn.ORIG_PKGNAME, packageName);    
+                map.put(DbusInterfaceToFqcn.DBUS_INTERFACE_NAME, packageName + "." + className); 
+            }
             return map;
         }
     }

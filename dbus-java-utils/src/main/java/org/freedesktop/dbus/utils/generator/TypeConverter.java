@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.freedesktop.dbus.Marshalling;
@@ -63,7 +65,17 @@ public class TypeConverter {
                 }
             }
             clazzName = clazzName.replace("java.lang.", "");
-
+                       
+            Pattern compile = Pattern.compile("([^, <>]+)");
+            Matcher matcher = compile.matcher(clazzName);
+            while (matcher.find()) {
+                String match = matcher.group();
+                if (_includes.contains(match)) {
+                    String plainClazzName = match.substring(match.lastIndexOf(".") +1);
+                    clazzName = clazzName.replace(match, plainClazzName);
+                }
+            }
+            
         } else {
             clazzName = _argType.substring(_argType.lastIndexOf(".") + 1);
             // change some boxed types back to primitives
@@ -147,7 +159,7 @@ public class TypeConverter {
         if (_dbusType.length() == 1) {
             Marshalling.getJavaType(_dbusType, dataType, 1);
 
-             type = dataType.stream()
+            type = dataType.stream()
                     .map(t -> {
                         return t.getTypeName();
                     })
@@ -213,27 +225,36 @@ public class TypeConverter {
             ParameterizedType dBusListType = (ParameterizedType) dataType.get(0);
             Type[] actualTypeArguments = dBusListType.getActualTypeArguments();
 
-            String actualArgTypeVal = "?";
-
             String retVal = dBusListType.getRawType().getTypeName();
-
+            List<String> internalTypes = new ArrayList<>();
+            
             if (actualTypeArguments.length > 0) {
-                Map<String, List<String>> typeAdv = getTypeAdv(actualTypeArguments[0], null);
+                Map<String, List<String>> allAdvTypes = new LinkedHashMap<>();
+                
+                for (Type type : actualTypeArguments) {
+                    Map<String, List<String>> typeAdv = getTypeAdv(type, null);
+                    allAdvTypes.putAll(typeAdv);
+                }
 
-                actualArgTypeVal = "";
-                for (Entry<String, List<String>> e : typeAdv.entrySet()) {
+                for (Entry<String, List<String>> e : allAdvTypes.entrySet()) {
                     if (!e.getValue().isEmpty()) {
-                        actualArgTypeVal += e.getKey() + "<";
+                        String actualArgTypeVal = e.getKey() + "<";
                         actualArgTypeVal += String.join(", ", e.getValue());
                         actualArgTypeVal += ">";
+                        internalTypes.add(actualArgTypeVal);
                         _javaIncludes.addAll(e.getValue());
-                    } else {
-                        actualArgTypeVal = e.getKey();
+                    } else { 
+                        internalTypes.add(e.getKey());
                     }
                 }
             }
-
-            return retVal + "<" + actualArgTypeVal + ">";
+            
+            // if key and value of map is of same type:
+            if (dataType.get(0) instanceof DBusMapType && internalTypes.size() == 1) {
+                internalTypes.add(internalTypes.get(0));
+            }
+            
+            return retVal + "<" + String.join(", ", internalTypes) + ">";
         }
         
         return dataType.get(0).getTypeName();

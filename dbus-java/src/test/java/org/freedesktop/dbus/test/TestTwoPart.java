@@ -11,7 +11,6 @@ import org.freedesktop.dbus.test.helper.interfaces.TwoPartInterface;
 import org.freedesktop.dbus.test.helper.interfaces.TwoPartObject;
 import org.freedesktop.dbus.test.helper.twopart.TwoPartTestClient.TwoPartTestObject;
 import org.freedesktop.dbus.test.helper.twopart.TwoPartTestServer;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 public class TestTwoPart {
@@ -20,13 +19,12 @@ public class TestTwoPart {
     private volatile boolean serverReady = false;
 
     @Test
-    @Disabled("sporadically fails due to timeout")
     public void testTwoPart() throws InterruptedException {
         TwoPartServer twoPartServer = new TwoPartServer();
         twoPartServer.start();
 
         while (!serverReady) {
-            Thread.sleep(500L);
+            Thread.sleep(1500L);
         }
 
         try {
@@ -54,7 +52,9 @@ public class TestTwoPart {
             } catch (InterruptedException ex) {
             }
 
-            conn.disconnect();
+            if (conn != null) {
+                conn.disconnect();
+            }
         } catch (DBusException _ex) {
             _ex.printStackTrace();
             fail("Exception in client");

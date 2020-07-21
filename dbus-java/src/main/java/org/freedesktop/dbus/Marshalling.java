@@ -12,7 +12,6 @@
 
 package org.freedesktop.dbus;
 
-import java.io.FileDescriptor;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -23,11 +22,11 @@ import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.freedesktop.dbus.annotations.Position;
 import org.freedesktop.dbus.connections.AbstractConnection;
@@ -51,7 +50,7 @@ import org.slf4j.LoggerFactory;
 public final class Marshalling {
     private static final Logger LOGGER = LoggerFactory.getLogger(Marshalling.class);
 
-    private static final Map<Type, String[]> TYPE_CACHE = new HashMap<>();
+    private static final Map<Type, String[]> TYPE_CACHE = new ConcurrentHashMap<>();
 
     private static final Map<Class<?>, Byte> CLASS_TO_ARGUMENTTYPE = new LinkedHashMap<>();
     static {
@@ -107,7 +106,7 @@ public final class Marshalling {
     * @throws DBusException If the given type cannot be converted to a DBus type.
     */
     public static String getDBusType(Type[] _javaType) throws DBusException {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         for (Type t : _javaType) {
             for (String s : getDBusType(t)) {
                 sb.append(s);
@@ -372,7 +371,7 @@ public final class Marshalling {
                     _resultValue.add(Byte.class);
                     break;
                 case Message.ArgumentType.OBJECT_PATH:
-                    _resultValue.add(DBusInterface.class);
+                    _resultValue.add(DBusPath.class);
                     break;
                 case Message.ArgumentType.UINT16:
                     _resultValue.add(UInt16.class);
@@ -667,7 +666,7 @@ public final class Marshalling {
                             Object[] sub = new Object[newtypes.length];
                             System.arraycopy(_parameters, i, sub, 0, newtypes.length);
                             sub = deSerializeParameters(sub, newtypes, _conn);
-                            DBusSerializable sz = dsc.newInstance();
+                            DBusSerializable sz = dsc.getDeclaredConstructor().newInstance();
                             m.invoke(sz, sub);
                             Object[] compress = new Object[_parameters.length - newtypes.length + 1];
                             System.arraycopy(_parameters, 0, compress, 0, i);

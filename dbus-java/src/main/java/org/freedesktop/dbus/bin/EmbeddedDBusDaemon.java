@@ -14,9 +14,9 @@ import org.freedesktop.dbus.exceptions.DBusException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import cx.ath.matthew.unix.UnixServerSocket;
-import cx.ath.matthew.unix.UnixSocket;
-import cx.ath.matthew.unix.UnixSocketAddress;
+import jnr.unixsocket.UnixServerSocketChannel;
+import jnr.unixsocket.UnixSocketAddress;
+import jnr.unixsocket.UnixSocketChannel;
 
 /**
  *
@@ -93,20 +93,22 @@ public class EmbeddedDBusDaemon implements Closeable {
 
     private void startUnixSocket(BusAddress address) throws IOException {
         LOGGER.debug("enter");
-        UnixServerSocket uss;
-        if (null != address.getParameter("abstract")) {
-            uss = new UnixServerSocket(new UnixSocketAddress(address.getParameter("abstract"), true));
+        UnixServerSocketChannel uss;
+        uss = UnixServerSocketChannel.open();
+
+        if (address.isAbstract()) {
+            uss.socket().bind(new UnixSocketAddress("\0" + address.getAbstract()));
         } else {
-            uss = new UnixServerSocket(new UnixSocketAddress(address.getParameter("path"), false));
+            uss.socket().bind(new UnixSocketAddress(address.getPath()));
         }
         listenSocket = uss;
 
         // accept new connections
         while (daemonThread.isRunning()) {
-            UnixSocket s = uss.accept();
-            if ((new SASL()).auth(SASL.MODE_SERVER, authTypes, address.getParameter("guid"), s.getOutputStream(), s.getInputStream(), s)) {
+             UnixSocketChannel s = uss.accept();
+            if ((new SASL(true)).auth(SASL.SaslMode.SERVER, authTypes, address.getGuid(), s.socket().getOutputStream(), s.socket().getInputStream(), s.socket())) {
                 // s.setBlocking(false);
-                daemonThread.addSock(s);
+                daemonThread.addSock(s.socket());
             } else {
                 s.close();
             }
@@ -120,7 +122,7 @@ public class EmbeddedDBusDaemon implements Closeable {
 
         LOGGER.debug("enter");
 
-        try (ServerSocket ss = new ServerSocket(Integer.parseInt(address.getParameter("port")), 10, InetAddress.getByName(address.getParameter("host")))) {
+        try (ServerSocket ss = new ServerSocket(address.getPort(), 10, InetAddress.getByName(address.getHost()))) {
             listenSocket = ss;
 
             // accept new connections
@@ -128,7 +130,7 @@ public class EmbeddedDBusDaemon implements Closeable {
                 Socket s = ss.accept();
                 boolean authOK = false;
                 try {
-                    authOK = (new SASL()).auth(SASL.MODE_SERVER, authTypes, address.getParameter("guid"), s.getOutputStream(), s.getInputStream(), null);
+                    authOK = (new SASL(false)).auth(SASL.SaslMode.SERVER, authTypes, address.getGuid(), s.getOutputStream(), s.getInputStream(), null);
                 } catch (Exception e) {
                     LOGGER.debug("", e);
                 }

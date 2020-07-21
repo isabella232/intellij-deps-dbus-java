@@ -7,7 +7,33 @@ Using this version as replacement for 2.7.x however, will not work without chang
 
 #### Changes
 
-##### Changes in 3.0.2 (upcoming, not released yet)
+##### Changes in 3.2.2 (not released yet):
+  - Fixed issue with introspection caused by changes in [#80](https://github.com/hypfvieh/dbus-java/issues/80) ([#103](https://github.com/hypfvieh/dbus-java/issues/103)), thanks to [AsamK](https://github.com/AsamK)
+  - Added support for FreeBSD, ([#105](https://github.com/hypfvieh/dbus-java/pull/105)) thanks to [grembo](https://github.com/grembo)
+  - Fixed SASL authentication may get stuck when using TCP ([#106](https://github.com/hypfvieh/dbus-java/pull/106)) thanks to [brett-smith](https://github.com/brett-smith)
+
+
+##### Changes in 3.2.1
+  - Fixed leaking signal handlers when using addSigHandler/removeSigHandler a lot ([#76](https://github.com/hypfvieh/dbus-java/issues/76))
+  - Fixed unexported objects shown in introspection output ([#80](https://github.com/hypfvieh/dbus-java/issues/80))
+  - Added support for providing alternative implementations of IMessageReader/IMessageWriter ([#81](https://github.com/hypfvieh/dbus-java/issues/81))
+  - Removed support for file descriptor passing, as it is not working with jnr-unixsocket ([#81](https://github.com/hypfvieh/dbus-java/issues/81))
+  - Fixed issue dealing with handled signals ([#97](https://github.com/hypfvieh/dbus-java/issues/97))
+  - Fixes issue with InterfaceCodeGenerator util ([#95](https://github.com/hypfvieh/dbus-java/issues/95))
+  - Fixes issue with InterfaceCodeGenerator util using incorrect type ([#83](https://github.com/hypfvieh/dbus-java/issues/83))
+
+##### Changes in 3.2.0 
+  - Replaced libmatthew with jnr-unixsocket
+  - Removed all native library files and sources 
+  - Added new transport system to use jnr-unixsocket (replaces old Transport class)
+  - Added support for empty collections/arrays (thanks to [chris-melman](https://github.com/chris-melman))
+  - Added support of DBUS_MACHINE_ID_LOCATION environment property to allow usage of dbus-java on Windows (thanks to [chris-melman](https://github.com/chris-melman))
+  - Allow change of the default socket timeout (thanks to [chris-melman](https://github.com/chris-melman))
+  - Detect system endianness for DBus message instead of using BIG endian all the time (#54)
+  - Allow changing the default endianness (DBusConnection.setEndianness())
+  - Providing OSGi ready artifact ([#33](https://github.com/hypfvieh/dbus-java/issues/32)) (thanks to [stack-head](https://github.com/stack-head))
+
+##### Changes in 3.0.2
   - Added support for handling various DBus signals without the need to create a specific interface class (thanks to [rm5248](https://github.com/rm5248))
   - Fixed issue with List containing another List (thanks to [rm5248](https://github.com/rm5248))
   - Changed project to multi-module. All tools (except DBusDaemon/DBusEmbeddedDaemon) are now part of the sub-module dbus-java-utils.

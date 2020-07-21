@@ -1,14 +1,19 @@
 package org.freedesktop.dbus.utils.generator;
 
 import java.io.File;
+import java.lang.annotation.Annotation;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
+
+import org.freedesktop.dbus.annotations.DBusInterfaceName;
 
 import com.github.hypfvieh.util.StringUtil;
 
@@ -19,8 +24,65 @@ import com.github.hypfvieh.util.StringUtil;
  * @since v3.0.1 - 2018-12-22
  */
 public class ClassBuilderInfo {
-	/** Imported files for this class. */
-    private final Set<String>            imports               = new LinkedHashSet<>();
+    
+    /** Set of reserved words in Java. */
+    private static final Set<String> RESERVED = new HashSet<>();
+    static {
+        RESERVED.add("abstract");
+        RESERVED.add("assert");
+        RESERVED.add("boolean");
+        RESERVED.add("break");
+        RESERVED.add("byte");
+        RESERVED.add("case");
+        RESERVED.add("catch");
+        RESERVED.add("char");
+        RESERVED.add("class");
+        RESERVED.add("const");
+        RESERVED.add("continue");
+        RESERVED.add("default");
+        RESERVED.add("do");
+        RESERVED.add("double");
+        RESERVED.add("else");
+        RESERVED.add("enum");
+        RESERVED.add("extends");
+        RESERVED.add("final");
+        RESERVED.add("finally");
+        RESERVED.add("float");
+        RESERVED.add("for");
+        RESERVED.add("goto");
+        RESERVED.add("if");
+        RESERVED.add("implements");
+        RESERVED.add("import");
+        RESERVED.add("instanceof");
+        RESERVED.add("int");
+        RESERVED.add("interface");
+        RESERVED.add("long");
+        RESERVED.add("native");
+        RESERVED.add("new");
+        RESERVED.add("null");
+        RESERVED.add("package");
+        RESERVED.add("private");
+        RESERVED.add("protected");
+        RESERVED.add("public");
+        RESERVED.add("return");
+        RESERVED.add("short");
+        RESERVED.add("static");
+        RESERVED.add("strictfp");
+        RESERVED.add("super");
+        RESERVED.add("switch");
+        RESERVED.add("synchronized");
+        RESERVED.add("this");
+        RESERVED.add("throw");
+        RESERVED.add("throws");
+        RESERVED.add("transient");
+        RESERVED.add("try");
+        RESERVED.add("void");
+        RESERVED.add("volatile");
+        RESERVED.add("while");
+    }
+    
+    /** Imported files for this class. */
+    private final Set<String>            imports               = new TreeSet<>();
     /** Members/Fields of this class. */
     private final List<ClassMember>      members               = new ArrayList<>();
     /** Interfaces implemented by this class. */
@@ -36,8 +98,12 @@ public class ClassBuilderInfo {
     private String                       className;
     /** Package of this class. */
     private String                       packageName;
+    
+    /** Package name used by DBus. */
+    private String                       dbusPackageName;
+
     /** Type of this class (interface or class). */
-    private ClassType                    classType;
+    private ClassType                     classType;
     /** Class which this class may extend. */
     private String                       extendClass;
 
@@ -51,6 +117,14 @@ public class ClassBuilderInfo {
 
     public void setPackageName(String _packageName) {
         packageName = _packageName;
+    }
+
+    public String getDbusPackageName() {
+        return dbusPackageName;
+    }
+
+    public void setDbusPackageName(String _dbusPackageName) {
+        dbusPackageName = _dbusPackageName;
     }
 
     public String getClassName() {
@@ -96,13 +170,13 @@ public class ClassBuilderInfo {
     public List<ClassConstructor> getConstructors() {
         return constructors;
     }
-
+    
     /**
      * Create the Java source for the class information provided.
      * @return String
      */
     public String createClassFileContent() {
-        List<String> result = createClassFileContent(false, null);
+        List<String> result = createClassFileContent(false, new LinkedHashSet<>());
         return String.join(System.lineSeparator(), result);
     }
 
@@ -119,6 +193,12 @@ public class ClassBuilderInfo {
         String classIndent = _staticClass ? "    " : "";
         String memberIndent = _staticClass ? "        " : "    ";
 
+        Set<String> allImports = new TreeSet<>();
+        allImports.addAll(getImports());
+        if (_otherImports != null) {
+            allImports.addAll(_otherImports);
+        }
+        
         if (!_staticClass) {
             content.add("package " + getPackageName() + ";");
             content.add("");
@@ -128,16 +208,19 @@ public class ClassBuilderInfo {
 
         } else {
             content.add("");
-            if (_otherImports != null) {
-                _otherImports.addAll(getImports());
-            }
         }
 
+        if (getDbusPackageName() != null) {
+            allImports.add(DBusInterfaceName.class.getName());
+            content.add(classIndent + "@" + DBusInterfaceName.class.getSimpleName() + "(\"" + getDbusPackageName() + "\")");
+        }
+        
         String bgn = classIndent + "public " + (_staticClass ? "static " : "") + (getClassType() == ClassType.INTERFACE ? "interface" : "class");
         bgn += " " + getClassName();
         if (getExtendClass() != null) {
             if (!getExtendClass().startsWith("java.lang.")) {
                 getImports().add(getExtendClass()); // add class import if extends-argument is not a java.lang. class
+                allImports.add(getExtendClass());
             }
 
             bgn += " extends " + getClassName(getExtendClass());
@@ -160,32 +243,50 @@ public class ClassBuilderInfo {
             if (!member.getAnnotations().isEmpty()) {
                 content.addAll(member.getAnnotations().stream().map(l -> memberIndent + l).collect(Collectors.toList()));
             }
-            String memberType = TypeConverter.getProperJavaClass(member.getType(), _otherImports);
+            String memberType = TypeConverter.getProperJavaClass(member.getType(), allImports);
             if (!member.getGenerics().isEmpty()) {
-                memberType += "<" + member.getGenerics().stream().map(c -> TypeConverter.getProperJavaClass(c, _otherImports)).collect(Collectors.joining(" ,")) + ">";
+                memberType += "<" + member.getGenerics().stream().map(c -> TypeConverter.getProperJavaClass(c, allImports)).collect(Collectors.joining(" ,")) + ">";
             }
             content.add(memberIndent + "private " + (member.isFinalMember() ? "final " : "") + memberType + " "
                     + member.getName() + ";");
+        
         }
 
         if (!getConstructors().isEmpty()) {
+            content.add("");
             for (ClassConstructor constructor : getConstructors()) {
-                String cstr = "    " + getClassName() + "(";
+                String outerIndent = _staticClass ? "        " : "    ";
+                String cstr = outerIndent + getClassName() + "(";
+                if (!constructor.getSuperArguments().isEmpty()) {
+                    cstr += constructor.getSuperArguments().entrySet().stream().map(e -> e.getValue() + " " + e.getKey()).collect(Collectors.joining(", "));
+                    if (!constructor.getArguments().isEmpty()) {
+                        cstr += ", ";
+                    }
+                }
                 if (!constructor.getArguments().isEmpty()) {
                     cstr += constructor.getArguments().entrySet().stream().map(e -> e.getValue() + " " + e.getKey()).collect(Collectors.joining(", "));
                 }
-                cstr += ") {";
+                
+                if (constructor.getThrowArguments().isEmpty()) {
+                    cstr += ") {";
+                } else {
+                    cstr += ") throws " + String.join(", ", constructor.getThrowArguments()) + " {";
+                }
+                
                 content.add(cstr);
+                
+                String innerIndent = _staticClass ? "            " : "        ";
+                
                 if (!constructor.getSuperArguments().isEmpty()) {
-                    content.add("super(" + String.join(", ", constructor.getSuperArguments()) + ");");
+                    content.add(innerIndent + "super(" + String.join(", ", constructor.getSuperArguments().keySet()) + ");");
                 }
                 if (!constructor.getArguments().isEmpty()) {
                     for (Entry<String, String> e : constructor.getArguments().entrySet()) {
-                        content.add("this." + e.getKey() + " = " + e.getKey() + ";");
+                        content.add(innerIndent + "this." + e.getKey().replaceFirst("^_(.+)", "$1") + " = " + e.getKey() + ";");
                     }
                 }
 
-                content.add("}");
+                content.add(outerIndent + "}");
             }
         }
 
@@ -193,20 +294,21 @@ public class ClassBuilderInfo {
 
         // add getter and setter
         for (ClassMember member : members) {
-            String memberType = TypeConverter.getProperJavaClass(member.getType(), _otherImports);
+            String memberType = TypeConverter.getProperJavaClass(member.getType(), allImports);
 
             if (!member.getGenerics().isEmpty()) {
-                memberType += "<" + member.getGenerics().stream().map(c -> TypeConverter.getProperJavaClass(c, _otherImports)).collect(Collectors.joining(" ,")) + ">";
+                memberType += "<" + member.getGenerics().stream().map(c -> TypeConverter.getProperJavaClass(c, allImports)).collect(Collectors.joining(" ,")) + ">";
             }
 
+            String getterSetterName = StringUtil.snakeToCamelCase(StringUtil.upperCaseFirstChar(member.getName()));
             if (!member.isFinalMember()) {
-                content.add(memberIndent + "public void set" + StringUtil.upperCaseFirstChar(member.getName()) + "("
+                content.add(memberIndent + "public void set" + getterSetterName + "("
                         + memberType + " arg) {");
                 content.add(memberIndent + "    " + member.getName() + " = arg;");
                 content.add(memberIndent +"}");
             }
             content.add("");
-            content.add(memberIndent + "public " + memberType + " get" + StringUtil.upperCaseFirstChar(member.getName()) + "() {");
+            content.add(memberIndent + "public " + memberType + " get" + getterSetterName + "() {");
             content.add(memberIndent + "    return " + member.getName() + ";");
             content.add(memberIndent + "}");
         }
@@ -219,7 +321,7 @@ public class ClassBuilderInfo {
         		content.addAll(mth.getAnnotations().stream().map(a -> memberIndent + a).collect(Collectors.toList()));
         	}
         	
-            String clzMth = memberIndent + "public " + (mth.getReturnType() == null ? "void " : TypeConverter.getProperJavaClass(mth.getReturnType(), _otherImports) + " ");
+            String clzMth = memberIndent + "public " + (mth.getReturnType() == null ? "void " : TypeConverter.getProperJavaClass(mth.getReturnType(), allImports) + " ");
             clzMth += mth.getName() + "(";
             if (!mth.getArguments().isEmpty()) {
                 clzMth += mth.getArguments().entrySet().stream().map(e -> e.getValue() + " " + e.getKey())
@@ -231,15 +333,16 @@ public class ClassBuilderInfo {
         content.add("");
 
         for (ClassBuilderInfo inner : getInnerClasses()) {
-            content.addAll(inner.createClassFileContent(true, this.getImports()));
+            content.addAll(inner.createClassFileContent(true, allImports));
+            allImports.addAll(inner.getImports()); // collect additional imports which may have been added by inner class
         }
-
+        
         content.add(classIndent + "}");
 
+        // write imports to resulting content if this is not a inner class
         if (!_staticClass) {
             content.add(2,"");
-            content.addAll(2, getImports().stream().filter(l -> !l.startsWith("java.lang.")).map(l -> "import " + l + ";").collect(Collectors.toList()));
-
+            content.addAll(2, allImports.stream().filter(l -> !l.startsWith("java.lang.")).map(l -> "import " + l + ";").collect(Collectors.toList()));
         }
 
         return content;
@@ -285,6 +388,32 @@ public class ClassBuilderInfo {
         return clzzName;
     }
 
+    /**
+     * Contains information about annotation to place on classes, members or methods.
+     * 
+     * @author hypfvieh
+     * @since v3.2.1 - 2019-11-13
+     */
+    public static class AnnotationInfo {
+        /** Annotation class. */
+        private final Class<? extends Annotation> annotationClass;
+        /** Annotation params (e.g. value = "foo", key = "bar"). */ 
+        private final String annotationParams;
+        
+        public AnnotationInfo(Class<? extends Annotation> _annotationClass, String _annotationParams) {
+            annotationClass = _annotationClass;
+            annotationParams = _annotationParams;
+        }
+
+        public Class<? extends Annotation> getAnnotationClass() {
+            return annotationClass;
+        }
+
+        public String getAnnotationParams() {
+            return annotationParams;
+        }
+    }
+    
     /**
      * Pojo which represents a class method.
      * 
@@ -350,7 +479,8 @@ public class ClassBuilderInfo {
         private final List<String> annotations = new ArrayList<>();
 
         public ClassMember(String _name, String _type, boolean _finalMember) {
-            name = _name;
+            // repair reserved words by adding 'Param' as appendix
+        	name = RESERVED.contains(_name) ? _name + "Param" : _name;
             type = _type;
             finalMember = _finalMember;
         }
@@ -387,12 +517,20 @@ public class ClassBuilderInfo {
     	/** List of arguments for the constructor. Key is argument name, value is argument type. */
         private final Map<String, String> arguments = new LinkedHashMap<>();
         /** List of arguments for the super-constructor. Key is argument name, value is argument type. */
-        private final List<String> superArguments = new ArrayList<>();
+        private final Map<String, String> superArguments = new LinkedHashMap<>();
+        
+        /** List of throws arguments. */
+        private final List<String> throwArguments = new ArrayList<>();
+        
+        public List<String> getThrowArguments() {
+            return throwArguments;
+        }
         
         public Map<String, String> getArguments() {
             return arguments;
         }
-        public List<String> getSuperArguments() {
+        
+        public Map<String, String> getSuperArguments() {
             return superArguments;
         }
     }

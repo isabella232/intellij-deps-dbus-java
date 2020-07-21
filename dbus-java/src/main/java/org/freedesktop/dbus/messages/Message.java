@@ -12,12 +12,8 @@
 
 package org.freedesktop.dbus.messages;
 
-import java.io.FileDescriptor;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Array;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Type;
 import java.text.MessageFormat;
 import java.util.ArrayList;
@@ -30,6 +26,7 @@ import org.freedesktop.Hexdump;
 import org.freedesktop.dbus.ArrayFrob;
 import org.freedesktop.dbus.Container;
 import org.freedesktop.dbus.DBusMap;
+import org.freedesktop.dbus.FileDescriptor;
 import org.freedesktop.dbus.Marshalling;
 import org.freedesktop.dbus.ObjectPath;
 import org.freedesktop.dbus.connections.AbstractConnection;
@@ -48,6 +45,10 @@ import org.slf4j.LoggerFactory;
  * format.
  */
 public class Message {
+    public static final int MAXIMUM_ARRAY_LENGTH = 67108864;
+    public static final int MAXIMUM_MESSAGE_LENGTH = MAXIMUM_ARRAY_LENGTH * 2;
+    public static final int MAXIMUM_NUM_UNIX_FDS = MAXIMUM_MESSAGE_LENGTH / 4;
+
     /** The current protocol major version. */
     public static final byte PROTOCOL    = 1;
 
@@ -73,6 +74,7 @@ public class Message {
     private byte[][]          wiredata;
     private long              bytecounter;
     private Map<Byte, Object> headers;
+    private List<FileDescriptor> filedescriptors;
 
     private long              serial;
     private byte              type;
@@ -90,7 +92,7 @@ public class Message {
 
     /**
      * Returns the name of the given header field.
-     * 
+     *
      * @param field field
      * @return string
      */
@@ -112,6 +114,8 @@ public class Message {
             return "Sender";
         case HeaderField.SIGNATURE:
             return "Signature";
+        case HeaderField.UNIX_FDS:
+            return "Unix FD";
         default:
             return "Invalid";
         }
@@ -119,7 +123,7 @@ public class Message {
 
     /**
      * Create a message; only to be called by sub-classes.
-     * 
+     *
      * @param endian The endianness to create the message.
      * @param _type The message type.
      * @param _flags Any message flags.
@@ -128,6 +132,7 @@ public class Message {
     protected Message(byte endian, byte _type, byte _flags) throws DBusException {
         wiredata = new byte[BUFFERINCREMENT][];
         headers = new HashMap<>();
+        filedescriptors = new ArrayList<>();
         big = (Endian.BIG == endian);
         bytecounter = 0;
         synchronized (Message.class) {
@@ -148,18 +153,19 @@ public class Message {
     protected Message() {
         wiredata = new byte[BUFFERINCREMENT][];
         headers = new HashMap<>();
+        filedescriptors = new ArrayList<>();
         bytecounter = 0;
     }
 
     /**
      * Create a message from wire-format data.
-     * 
+     *
      * @param _msg D-Bus serialized data of type yyyuu
      * @param _headers D-Bus serialized data of type a(yv)
      * @param _body D-Bus serialized data of the signature defined in headers.
      */
     @SuppressWarnings("unchecked")
-    void populate(byte[] _msg, byte[] _headers, byte[] _body) throws DBusException {
+    void populate(byte[] _msg, byte[] _headers, byte[] _body, List<FileDescriptor> descriptors) throws DBusException {
         big = (_msg[0] == Endian.BIG);
         type = _msg[1];
         flags = _msg[2];
@@ -172,8 +178,9 @@ public class Message {
         bodylen = ((Number) extract(Message.ArgumentType.UINT32_STRING, _msg, 4)[0]).longValue();
         serial = ((Number) extract(Message.ArgumentType.UINT32_STRING, _msg, 8)[0]).longValue();
         bytecounter = _msg.length + _headers.length + _body.length;
+        filedescriptors = descriptors;
 
-        logger.trace(_headers.toString());
+        logger.trace("Message header: {}", Hexdump.toAscii(_headers));
         Object[] hs = extract("a(yv)", _headers, 0);
         if (logger.isTraceEnabled()) {
             logger.trace(Arrays.deepToString(hs));
@@ -220,7 +227,7 @@ public class Message {
 
     /**
      * Ensures there are enough free buffers.
-     * 
+     *
      * @param num number of free buffers to create.
      */
     private void ensureBuffers(int num) {
@@ -240,7 +247,7 @@ public class Message {
 
     /**
      * Appends a buffer to the buffer list.
-     * 
+     *
      * @param buf buffer byte array
      */
     protected void appendBytes(byte[] buf) {
@@ -270,7 +277,7 @@ public class Message {
 
     /**
      * Appends a byte to the buffer list.
-     * 
+     *
      * @param b byte
      */
     protected void appendByte(byte b) {
@@ -294,7 +301,7 @@ public class Message {
 
     /**
      * Demarshalls an integer of a given width from a buffer. Endianness is determined from the format of the message.
-     * 
+     *
      * @param buf The buffer to demarshall from.
      * @param ofs The offset to demarshall from.
      * @param width The byte-width of the int.
@@ -307,7 +314,7 @@ public class Message {
 
     /**
      * Demarshalls an integer of a given width from a buffer.
-     * 
+     *
      * @param buf The buffer to demarshall from.
      * @param ofs The offset to demarshall from.
      * @param endian The endianness to use in demarshalling.
@@ -321,7 +328,7 @@ public class Message {
 
     /**
      * Demarshalls an integer of a given width from a buffer using big-endian format.
-     * 
+     *
      * @param buf The buffer to demarshall from.
      * @param ofs The offset to demarshall from.
      * @param width The byte-width of the int.
@@ -338,7 +345,7 @@ public class Message {
 
     /**
      * Demarshalls an integer of a given width from a buffer using little-endian format.
-     * 
+     *
      * @param buf The buffer to demarshall from.
      * @param ofs The offset to demarshall from.
      * @param width The byte-width of the int.
@@ -356,7 +363,7 @@ public class Message {
 
     /**
      * Marshalls an integer of a given width and appends it to the message. Endianness is determined from the message.
-     * 
+     *
      * @param l The integer to marshall.
      * @param width The byte-width of the int.
      */
@@ -368,7 +375,7 @@ public class Message {
 
     /**
      * Marshalls an integer of a given width into a buffer. Endianness is determined from the message.
-     * 
+     *
      * @param l The integer to marshall.
      * @param buf The buffer to marshall to.
      * @param ofs The offset to marshall to.
@@ -386,7 +393,7 @@ public class Message {
 
     /**
      * Marshalls an integer of a given width into a buffer using big-endian format.
-     * 
+     *
      * @param l The integer to marshall.
      * @param buf The buffer to marshall to.
      * @param ofs The offset to marshall to.
@@ -401,7 +408,7 @@ public class Message {
 
     /**
      * Marshalls an integer of a given width into a buffer using little-endian format.
-     * 
+     *
      * @param l The integer to marshall.
      * @param buf The buffer to demarshall to.
      * @param ofs The offset to demarshall to.
@@ -416,6 +423,10 @@ public class Message {
 
     public byte[][] getWireData() {
         return wiredata;
+    }
+    
+    public List<FileDescriptor> getFiledescriptors(){
+        return filedescriptors;
     }
 
     /**
@@ -460,7 +471,9 @@ public class Message {
             sb.append('}');
         } else {
             for (Object o : largs) {
-                if (o instanceof Object[]) {
+                if (o == null) {
+                    sb.append("null");
+                } else if (o instanceof Object[]) {
                     sb.append(Arrays.deepToString((Object[]) o));
                 } else if (o instanceof byte[]) {
                     sb.append(Arrays.toString((byte[]) o));
@@ -477,7 +490,7 @@ public class Message {
                 } else if (o instanceof float[]) {
                     sb.append(Arrays.toString((float[]) o));
                 } else {
-                    sb.append(o.toString());
+                    sb.append(o);
                 }
                 sb.append(',');
                 sb.append(' ');
@@ -490,7 +503,7 @@ public class Message {
 
     /**
      * Returns the value of the header field of a given field.
-     * 
+     *
      * @param _type The field to return.
      * @return The value of the field or null if unset.
      */
@@ -501,7 +514,7 @@ public class Message {
     /**
      * Appends a value to the message. The type of the value is read from a D-Bus signature and used to marshall the
      * value.
-     * 
+     *
      * @param sigb A buffer of the D-Bus signature.
      * @param sigofs The offset into the signature corresponding to this value.
      * @param data The value to marshall.
@@ -556,8 +569,9 @@ public class Message {
                 appendint(((Number) data).shortValue(), 2);
                 break;
             case ArgumentType.FILEDESCRIPTOR:
-                int x = getFileDescriptor((FileDescriptor) data);
-                appendint(((Number) x).longValue(), 4);
+                filedescriptors.add((FileDescriptor)data);
+                appendint(filedescriptors.size() - 1, 4);
+                logger.debug( "Just inserted {} as filedescriptor", filedescriptors.size() - 1 );
                 break;
             case ArgumentType.STRING:
             case ArgumentType.OBJECT_PATH:
@@ -661,21 +675,19 @@ public class Message {
                     for (Object o : contents) {
                         diff = appendone(sigb, i, o);
                     }
+                    if (contents.length == 0) {
+                        diff = EmptyCollectionHelper.determineSignatureOffsetArray(sigb, diff);
+                    }
                     i = diff;
                 } else if (data instanceof Map) {
                     int diff = i;
-                    ensureBuffers(((Map<?, ?>) data).size() * 6);
-                    for (Map.Entry<Object, Object> o : ((Map<Object, Object>) data).entrySet()) {
+                    Map<Object, Object> map = (Map<Object, Object>) data;
+                    ensureBuffers(map.size() * 6);
+                    for (Map.Entry<Object, Object> o : map.entrySet()) {
                         diff = appendone(sigb, i, o);
                     }
-                    if (i == diff) {
-                        // advance the type parser even on 0-size arrays.
-                        List<Type> temp = new ArrayList<>();
-                        byte[] temp2 = new byte[sigb.length - diff];
-                        System.arraycopy(sigb, diff, temp2, 0, temp2.length);
-                        String temp3 = new String(temp2);
-                        int temp4 = Marshalling.getJavaType(temp3, temp, 1);
-                        diff += temp4;
+                    if (map.size() == 0) {
+                        diff = EmptyCollectionHelper.determineSignatureOffsetDict(sigb, diff);
                     }
                     i = diff;
                 } else {
@@ -684,6 +696,9 @@ public class Message {
                     int diff = i;
                     for (Object o : contents) {
                         diff = appendone(sigb, i, o);
+                    }
+                    if (contents.length == 0) {
+                        diff = EmptyCollectionHelper.determineSignatureOffsetArray(sigb, diff);
                     }
                     i = diff;
                 }
@@ -756,7 +771,7 @@ public class Message {
 
     /**
      * Pad the message to the proper alignment for the given type.
-     * 
+     *
      * @param _type type
      */
     public void pad(byte _type) {
@@ -780,7 +795,7 @@ public class Message {
 
     /**
      * Return the alignment for a given type.
-     * 
+     *
      * @param type type
      * @return int
      */
@@ -822,7 +837,7 @@ public class Message {
 
     /**
      * Append a series of values to the message.
-     * 
+     *
      * @param sig The signature(s) of the value(s).
      * @param data The value(s).
      *
@@ -840,7 +855,7 @@ public class Message {
 
     /**
      * Align a counter to the given type.
-     * 
+     *
      * @param _current The current counter.
      * @param _type The type to align to.
      * @return The new, aligned, counter.
@@ -856,7 +871,7 @@ public class Message {
 
     /**
      * Demarshall one value from a buffer.
-     * 
+     *
      * @param _signatureBuf A buffer of the D-Bus signature.
      * @param _dataBuf The buffer to demarshall from.
      * @param _offsets An array of two ints, which holds the position of the current signature offset and the current
@@ -953,9 +968,11 @@ public class Message {
             break;
         case ArgumentType.DICT_ENTRY1:
             Object[] decontents = new Object[2];
-            logger.trace("Extracting Dict Entry ({}) from: {}",
-                    Hexdump.toAscii(_signatureBuf, _offsets[OFFSET_SIG], _signatureBuf.length - _offsets[OFFSET_SIG]),
-                    Hexdump.toHex(_dataBuf, _offsets[OFFSET_DATA], _dataBuf.length - _offsets[OFFSET_DATA]));
+            if(logger.isTraceEnabled()) { // avoid allocating these large heapdumps when trace logging is disabled
+                logger.trace("Extracting Dict Entry ({}) from: {}",
+                        Hexdump.toAscii(_signatureBuf, _offsets[OFFSET_SIG], _signatureBuf.length - _offsets[OFFSET_SIG]),
+                        Hexdump.toHex(_dataBuf, _offsets[OFFSET_DATA], _dataBuf.length - _offsets[OFFSET_DATA]));
+            }
             _offsets[OFFSET_SIG]++;
             decontents[0] = extractOne(_signatureBuf, _dataBuf, _offsets, true);
             _offsets[OFFSET_SIG]++;
@@ -973,7 +990,7 @@ public class Message {
             _offsets[OFFSET_DATA] = newofs[OFFSET_DATA];
             break;
         case ArgumentType.FILEDESCRIPTOR:
-            rv = createFileDescriptorByReflection(demarshallint(_dataBuf, _offsets[OFFSET_DATA], 4));
+            rv = filedescriptors.get((int)demarshallint(_dataBuf, _offsets[OFFSET_DATA], 4));
             _offsets[OFFSET_DATA] += 4;
             break;
         case ArgumentType.STRING:
@@ -1009,30 +1026,6 @@ public class Message {
             }
         }
         return rv;
-    }
-
-    private int getFileDescriptor(FileDescriptor _data) throws MarshallingException {
-        Field declaredField;
-        try {
-            declaredField = _data.getClass().getDeclaredField("fd");
-            declaredField.setAccessible(true);
-            return declaredField.getInt(_data);
-        } catch (NoSuchFieldException | SecurityException | IllegalArgumentException | IllegalAccessException _ex) {
-            logger.error("Could not get filedescriptor by reflection.", _ex);
-            throw new MarshallingException("Could not get member 'fd' of FileDescriptor by reflection!", _ex);
-        }
-    }
-
-    private FileDescriptor createFileDescriptorByReflection(long _demarshallint) throws MarshallingException {
-        try {
-            Constructor<FileDescriptor> constructor = FileDescriptor.class.getDeclaredConstructor(int.class);
-            constructor.setAccessible(true);
-            return constructor.newInstance((int) _demarshallint);
-        } catch (NoSuchMethodException | SecurityException | InstantiationException | IllegalAccessException
-                | IllegalArgumentException | InvocationTargetException _ex) {
-            logger.error("Could not create new FileDescriptor instance by reflection.", _ex);
-            throw new MarshallingException("Could not create new FileDescriptor instance by reflection", _ex);
-        }
     }
 
     private Object optimizePrimitives(byte[] _signatureBuf, byte[] _dataBuf, int[] _offsets, long size, byte algn,
@@ -1128,7 +1121,7 @@ public class Message {
 
     /**
      * Demarshall values from a buffer.
-     * 
+     *
      * @param _signature The D-Bus signature(s) of the value(s).
      * @param _dataBuf The buffer to demarshall from.
      * @param _offsets The offset into the data buffer to start.
@@ -1144,7 +1137,7 @@ public class Message {
 
     /**
      * Demarshall values from a buffer.
-     * 
+     *
      * @param _signature The D-Bus signature(s) of the value(s).
      * @param _dataBuf The buffer to demarshall from.
      * @param _offsets An array of two ints, which holds the position of the current signature offset and the current
@@ -1167,7 +1160,7 @@ public class Message {
 
     /**
      * Returns the Bus ID that sent the message.
-     * 
+     *
      * @return string
      */
     public String getSource() {
@@ -1176,7 +1169,7 @@ public class Message {
 
     /**
      * Returns the destination of the message.
-     * 
+     *
      * @return string
      */
     public String getDestination() {
@@ -1185,7 +1178,7 @@ public class Message {
 
     /**
      * Returns the interface of the message.
-     * 
+     *
      * @return string
      */
     public String getInterface() {
@@ -1194,7 +1187,7 @@ public class Message {
 
     /**
      * Returns the object path of the message.
-     * 
+     *
      * @return string
      */
     public String getPath() {
@@ -1207,7 +1200,7 @@ public class Message {
 
     /**
      * Returns the member name or error name this message represents.
-     * 
+     *
      * @return string
      */
     public String getName() {
@@ -1220,7 +1213,7 @@ public class Message {
 
     /**
      * Returns the dbus signature of the parameters.
-     * 
+     *
      * @return string
      */
     public String getSig() {
@@ -1229,7 +1222,7 @@ public class Message {
 
     /**
      * Returns the message flags.
-     * 
+     *
      * @return int
      */
     public int getFlags() {
@@ -1238,7 +1231,7 @@ public class Message {
 
     /**
      * Returns the message serial ID (unique for this connection)
-     * 
+     *
      * @return the message serial.
      */
     public long getSerial() {
@@ -1247,7 +1240,7 @@ public class Message {
 
     /**
      * If this is a reply to a message, this returns its serial.
-     * 
+     *
      * @return The reply serial, or 0 if it is not a reply.
      */
     public long getReplySerial() {
@@ -1260,7 +1253,7 @@ public class Message {
 
     /**
      * Parses and returns the parameters to this message as an Object array.
-     * 
+     *
      * @return object array
      * @throws DBusException on failure
      */
@@ -1282,7 +1275,7 @@ public class Message {
 
     /**
      * Warning, do not use this method unless you really know what you are doing.
-     * 
+     *
      * @param source string
      * @throws DBusException on error
      */
@@ -1308,6 +1301,18 @@ public class Message {
         }
     }
 
+    /**
+     * Type of this message.
+     * @return byte
+     */
+    public byte getType() {
+        return type;
+    }
+
+    public byte getEndianess() {
+        return big ? Endian.BIG : Endian.LITTLE;
+    }
+    
     /** Defines constants representing the flags which can be set on a message. */
     public interface Flags {
         byte NO_REPLY_EXPECTED = 0x01;
@@ -1333,6 +1338,7 @@ public class Message {
         byte DESTINATION  = 6;
         byte SENDER       = 7;
         byte SIGNATURE    = 8;
+        byte UNIX_FDS     = 9;
     }
 
     /**

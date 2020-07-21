@@ -22,8 +22,10 @@ import org.freedesktop.dbus.test.TestAll;
 import org.freedesktop.dbus.test.helper.interfaces.SampleNewInterface;
 import org.freedesktop.dbus.test.helper.interfaces.SampleRemoteInterface;
 import org.freedesktop.dbus.test.helper.interfaces.SampleRemoteInterface2;
+import org.freedesktop.dbus.test.helper.structs.IntStruct;
 import org.freedesktop.dbus.test.helper.structs.SampleStruct;
 import org.freedesktop.dbus.test.helper.structs.SampleStruct3;
+import org.freedesktop.dbus.test.helper.structs.SampleStruct4;
 import org.freedesktop.dbus.test.helper.structs.SampleTuple;
 import org.freedesktop.dbus.types.UInt16;
 import org.freedesktop.dbus.types.UInt32;
@@ -53,6 +55,18 @@ public class SampleClass implements SampleRemoteInterface, SampleRemoteInterface
         }
         return out;
     }
+    
+    @Override
+	public int[][] testListstruct(SampleStruct4 in) {
+		List<IntStruct> list = in.getInnerListOfLists();
+		int size = list.size();
+		int[][] retVal = new int [size][];
+		for(int i = 0; i < size; i++) {
+			IntStruct elem = list.get(i);
+			retVal[i] = new int [] { elem.getValue1(), elem.getValue2()}; 
+		}
+		return retVal;
+	}
 
     @Override
     public float testfloat(float[] f) {
@@ -195,13 +209,13 @@ public class SampleClass implements SampleRemoteInterface, SampleRemoteInterface
         if (mus.size() != 3) {
             fail("Sub-Map was wrong size");
         }
-        if (!(new Short((short) 5).equals(mus.get(new UInt16(4))))) {
+        if (!(Short.valueOf((short) 5).equals(mus.get(new UInt16(4))))) {
             fail("Sub-Map has wrong contents");
         }
-        if (!(new Short((short) 6).equals(mus.get(new UInt16(5))))) {
+        if (!(Short.valueOf((short) 6).equals(mus.get(new UInt16(5))))) {
             fail("Sub-Map has wrong contents");
         }
-        if (!(new Short((short) 7).equals(mus.get(new UInt16(6))))) {
+        if (!(Short.valueOf((short) 7).equals(mus.get(new UInt16(6))))) {
             fail("Sub-Map has wrong contents");
         }
         return -5;
