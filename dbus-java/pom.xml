@@ -33,6 +33,19 @@
         <dependency>
             <groupId>com.github.jnr</groupId>
             <artifactId>jnr-unixsocket</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.github.jnr</groupId>
+                    <artifactId>jffi</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- It's impossible to exclude jffi only with "native" classifier -->
+        <dependency>
+            <groupId>com.github.jnr</groupId>
+            <artifactId>jffi</artifactId>
+            <version>1.2.19</version>
         </dependency>
 
         <dependency>
