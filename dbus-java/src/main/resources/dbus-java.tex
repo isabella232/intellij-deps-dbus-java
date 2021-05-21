@@ -37,7 +37,7 @@
 
 \begin{document}
 
-\def\javadocroot/{http://dbus.freedesktop.org/doc/dbus-java/api/}
+\def\javadocroot/{https://dbus.freedesktop.org/doc/dbus-java/api/}
 
 \maketitle
 
@@ -62,8 +62,8 @@ runtime exception and so the compiler will not remind you to handle it.
 
 The Java D-Bus API is also documented in the JavaDoc\footnote{\url{\javadocroot/}},
 D-Bus is described in the
-specification\footnote{http://dbus.freedesktop.org/doc/dbus-specification.html}
-and the API documentation\footnote{http://dbus.freedesktop.org/doc/api/html/}.
+specification\footnote{https://dbus.freedesktop.org/doc/dbus-specification.html}
+and the API documentation\footnote{https://dbus.freedesktop.org/doc/api/html/}.
 
 \subsection{Protocol Implementation}
 
@@ -74,7 +74,7 @@ a wrapper around the C reference implementation.
 
 This library requires Java 1.5-compatible VM and compiler (either Sun, or
 ecj+jamvm with classpath-generics newer than 0.19) and the unix socket, debug
-and hexdump libraries from \url{http://www.matthew.ath.cx/projects/java/}.
+and hexdump libraries from \url{https://www.matthew.ath.cx/projects/java/}.
 
 \subsection{D-Bus Terminology}
 
@@ -833,7 +833,7 @@ public class TestSerializable implements DBusSerializable
 D-Bus provides a method to get introspection data on a remote object, which
 describes the interfaces, methods and signals it provides.  This introspection
 data is in XML
-format\footnote{http://dbus.freedesktop.org/doc/dbus-specification.html\#introspection-format}.
+format\footnote{https://dbus.freedesktop.org/doc/dbus-specification.html\#introspection-format}.
 The library automatically provides XML introspection data on all objects which
 are exported by it.  Introspection data can be used to create Java interface
 definitions automatically.
@@ -1064,7 +1064,7 @@ conn.disconnect();
 \section{Examples}
 
 As an example here are a complete set of interfaces for the
-bluemon\footnote{http://www.matthew.ath.cx/projects/bluemon} daemon,
+bluemon\footnote{https://www.matthew.ath.cx/projects/bluemon} daemon,
 which communicates over D-Bus. These interfaces were all created by
 querying introspection data over the bus.
 

@@ -153,7 +153,7 @@ Version 2.1:
 Version 2.0:
 	
 	* Remove libdbus-1 dependency and talk the wire protocol directly
-	* Add dependency on http://www.matthew.ath.cx/projects/java/ unix, debug
+	* Add dependency on https://www.matthew.ath.cx/projects/java/ unix, debug
      and hexdump libraries
 	* API changes:
 		* Exceptions (including DBusException and DBusExecutionException) moved
